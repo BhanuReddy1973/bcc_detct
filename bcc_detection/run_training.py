@@ -165,23 +165,29 @@ def create_data_loaders(data_dir, batch_size=32, num_samples=100, used_samples=N
             train_sampler = None
             test_sampler = None
         
-        # Create data loaders
+        # Create data loaders with optimized settings
         train_loader = DataLoader(
             full_dataset,
             batch_size=batch_size,
             sampler=train_sampler,
-            num_workers=4,  # Increased for HPC
+            num_workers=2,  # Reduced number of workers
             pin_memory=True,
-            persistent_workers=True
+            persistent_workers=True,
+            prefetch_factor=2,  # Add prefetch factor
+            timeout=60,  # Add timeout
+            drop_last=True  # Drop last incomplete batch
         )
         
         test_loader = DataLoader(
             test_dataset,
             batch_size=batch_size,
             sampler=test_sampler,
-            num_workers=4,
+            num_workers=2,
             pin_memory=True,
-            persistent_workers=True
+            persistent_workers=True,
+            prefetch_factor=2,
+            timeout=60,
+            drop_last=True
         )
         
         return train_loader, test_loader
@@ -190,6 +196,91 @@ def create_data_loaders(data_dir, batch_size=32, num_samples=100, used_samples=N
         logging.error(f"Error creating data loaders: {str(e)}")
         raise
 
+def train_epoch(model, train_loader, criterion, optimizer, device, scaler):
+    model.train()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    all_preds = []
+    all_labels = []
+    
+    try:
+        for inputs, labels in train_loader:
+            try:
+                inputs, labels = inputs.to(device), labels.to(device)
+                
+                optimizer.zero_grad()
+                
+                with amp.autocast():
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                
+                running_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += predicted.eq(labels).sum().item()
+                
+                all_preds.extend(predicted.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+                
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    logging.warning("GPU out of memory, skipping batch")
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    continue
+                else:
+                    raise e
+                    
+    except Exception as e:
+        logging.error(f"Error in training epoch: {str(e)}")
+        raise
+    
+    return running_loss / len(train_loader), 100. * correct / total, all_preds, all_labels
+
+def validate(model, val_loader, criterion, device):
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    all_preds = []
+    all_labels = []
+    
+    try:
+        with torch.no_grad():
+            for inputs, labels in val_loader:
+                try:
+                    inputs, labels = inputs.to(device), labels.to(device)
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                    
+                    running_loss += loss.item()
+                    _, predicted = outputs.max(1)
+                    total += labels.size(0)
+                    correct += predicted.eq(labels).sum().item()
+                    
+                    all_preds.extend(predicted.cpu().numpy())
+                    all_labels.extend(labels.cpu().numpy())
+                    
+                except RuntimeError as e:
+                    if "out of memory" in str(e):
+                        logging.warning("GPU out of memory, skipping batch")
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                        continue
+                    else:
+                        raise e
+                        
+    except Exception as e:
+        logging.error(f"Error in validation: {str(e)}")
+        raise
+    
+    return running_loss / len(val_loader), 100. * correct / total, all_preds, all_labels
+
 def main():
     try:
         # Parse command line arguments
@@ -197,6 +288,7 @@ def main():
         parser.add_argument('--num-samples', type=int, default=100, help='Number of samples to use')
         parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
         parser.add_argument('--epochs', type=int, default=20, help='Number of epochs')
+        parser.add_argument('--num-workers', type=int, default=2, help='Number of data loader workers')
         args = parser.parse_args()
         
         # Setup distributed training
@@ -210,7 +302,7 @@ def main():
         device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
         logging.info(f"Using device: {device}")
         
-        # Create data loaders
+        # Create data loaders with optimized settings
         train_loader, test_loader = create_data_loaders(
             data_dir=DATA_DIR,
             batch_size=args.batch_size,
