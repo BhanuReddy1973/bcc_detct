@@ -1,12 +1,31 @@
+import os
 import torch
-import torch.utils.data
+import torch.nn as nn
+import torch.distributed as dist
+from torch.utils.data import DataLoader, SubsetRandomSampler, DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torchvision import transforms
+from pathlib import Path
+import numpy as np
 from PIL import Image
 import random
-from pathlib import Path
-from torchvision import transforms
-from torch.utils.data import DataLoader
-from bcc_detection.models.bcc_model import BCCModel
-from bcc_detection.configs.config import Config
+from sklearn.model_selection import ParameterGrid, KFold
+import copy
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix, classification_report
+import json
+import logging
+from datetime import datetime
+import torch.cuda.amp as amp
+import gc
+import argparse
+import socket
+import time
+import psutil
+import subprocess
+from models.bcc_model import BCCModel
+from configs.config import Config
 
 class BCCDataset(torch.utils.data.Dataset):
     def __init__(self, data_dir, transform=None, split='train', num_samples=None, used_samples=None):       
@@ -188,6 +207,47 @@ def validate(model, val_loader, criterion, device):
             correct += (predicted == labels).sum().item()
 
     return running_loss / len(val_loader), 100 * correct / total
+
+def train_with_hyperparams(model, train_loader, test_loader, criterion, optimizer, device, num_epochs=20, iteration=1):
+    """Train model with given hyperparameters"""
+    best_val_acc = 0.0
+    best_model_path = None
+    scaler = amp.GradScaler()
+
+    for epoch in range(num_epochs):
+        train_loss, train_acc, train_preds, train_labels = train_epoch(
+            model, train_loader, criterion, optimizer, device, scaler
+        )
+        val_loss, val_acc, val_preds, val_labels = validate(
+            model, test_loader, criterion, device
+        )
+
+        logging.info(f'Epoch {epoch+1}/{num_epochs}:')
+        logging.info(f'Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
+        logging.info(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
+
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_model_path = f'best_model_iteration_{iteration}.pth'
+            torch.save(model.state_dict(), best_model_path)
+            logging.info(f'New best model saved with validation accuracy: {val_acc:.2f}%')
+
+    return best_model_path
+
+def plot_confusion_matrix(y_true, y_pred, iteration=1):
+    """Plot and save confusion matrix"""
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+    plt.title('Confusion Matrix')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    
+    # Save the plot
+    plots_dir = Path(__file__).parent / "visualizations"
+    plots_dir.mkdir(exist_ok=True)
+    plt.savefig(plots_dir / f'confusion_matrix_iteration_{iteration}.png')
+    plt.close()
 
 def main():
     import argparse
