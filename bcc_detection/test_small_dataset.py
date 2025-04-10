@@ -11,8 +11,9 @@ import numpy as np
 import argparse
 from pathlib import Path
 
-# Force CPU usage
+# Force CPU usage and configure PyTorch
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 torch.set_num_threads(1)  # Limit CPU threads
 device = torch.device('cpu')
 
@@ -115,12 +116,14 @@ def main():
     print("\nTesting batch loading...")
     try:
         for batch_idx, (images, labels) in enumerate(test_loader):
-            print(f"Batch {batch_idx + 1}: Images shape: {images.shape}, Labels shape: {labels.shape}")
-            print(f"Labels in this batch: {labels.tolist()}")
-            print(f"Successfully loaded batch {batch_idx + 1}")
+            print(f"\nBatch {batch_idx + 1}:")
+            print(f"Images shape: {images.shape}")
+            print(f"Labels: {labels}")
             
             if batch_idx >= 2:  # Only test first 3 batches
                 break
+                
+        print("\nTest completed successfully!")
                 
     except Exception as e:
         print(f"Error in main: {str(e)}")
