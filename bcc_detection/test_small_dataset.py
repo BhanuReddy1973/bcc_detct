@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 import random
 import numpy as np
 from PIL import Image
+import torchvision.transforms as transforms
 
 # Increase PIL image size limit
 Image.MAX_IMAGE_PIXELS = None
@@ -16,6 +17,7 @@ class SimpleTIFDataset(Dataset):
         self.image_paths = image_paths
         self.labels = labels
         self.transform = transform
+        self.resize = transforms.Resize((512, 512))  # Resize to a manageable size
     
     def __len__(self):
         return len(self.image_paths)
@@ -24,6 +26,11 @@ class SimpleTIFDataset(Dataset):
         try:
             # Load image
             img = Image.open(self.image_paths[idx])
+            
+            # Resize image
+            img = self.resize(img)
+            
+            # Convert to numpy array
             img = np.array(img)
             
             # Convert to tensor and normalize
@@ -79,12 +86,12 @@ def get_small_dataset(num_samples_per_class=5):
             labels=labels
         )
         
-        # Create data loader
+        # Create data loader with fewer workers to reduce memory usage
         loader = DataLoader(
             dataset,
             batch_size=4,
             shuffle=True,
-            num_workers=4,
+            num_workers=2,  # Reduced number of workers
             pin_memory=True
         )
         
