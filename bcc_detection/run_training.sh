@@ -1,4 +1,13 @@
 #!/bin/bash
+#SBATCH --job-name=bcc_train
+#SBATCH --output=logs/bcc_train_%j.out
+#SBATCH --error=logs/bcc_train_%j.err
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=24:00:00
 
 # Exit on error
 set -e
@@ -8,7 +17,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
 # Load required modules
-module load cuda/11.8
+module load cuda/11.7
 module load python/3.9
 module load gcc/9.3.0
 
@@ -45,9 +54,16 @@ if [ $GPU_MEM -lt 16000 ]; then
     sed -i 's/batch_size: 32/batch_size: 16/' configs/training_config.yaml
 fi
 
-# Run the training script with memory monitoring
-echo "Starting training..."
-python run_training.py
+# Set up environment variables
+export PYTHONPATH=/home/bhanu/bcc_detection:$PYTHONPATH
+
+# Run the training script
+python run_training.py \
+    --num-samples 100 \
+    --batch-size 32 \
+    --epochs 10 \
+    --num-workers 4 \
+    --num-folds 5
 
 # Check if training completed successfully
 if [ $? -eq 0 ]; then

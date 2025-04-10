@@ -714,7 +714,7 @@ def main():
         logging.info(f"Starting training process on rank {rank} of {world_size}")
         
         # Set device
-        device = torch.device("cpu")  # Force CPU for testing
+        device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
         logging.info(f"Using device: {device}")
         
         # Run cross-validation
