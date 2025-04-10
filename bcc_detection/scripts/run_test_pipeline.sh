@@ -12,6 +12,9 @@
 # Print start time
 echo "Job started at $(date)"
 
+# Get the current user's home directory
+USER_HOME=$(eval echo ~${SUDO_USER:-$USER})
+
 # Install system dependencies for OpenSlide
 echo "Installing system dependencies..."
 sudo apt-get update
@@ -19,10 +22,11 @@ sudo apt-get install -y openslide-tools libopenslide-dev
 
 # Activate virtual environment
 echo "Activating virtual environment..."
-if [ -d "/home/bhanu/bcc_detection/bcc_detection/venv" ]; then
-    source /home/bhanu/bcc_detection/bcc_detection/venv/bin/activate
+VENV_PATH="${USER_HOME}/bcc_detection/bcc_detection/venv"
+if [ -d "$VENV_PATH" ]; then
+    source "${VENV_PATH}/bin/activate"
 else
-    echo "Error: Virtual environment not found at /home/bhanu/bcc_detection/bcc_detection/venv"
+    echo "Error: Virtual environment not found at $VENV_PATH"
     exit 1
 fi
 
@@ -55,7 +59,7 @@ fi
 
 # Run the test pipeline
 echo "Starting test pipeline..."
-python test_small_dataset.py \
+python "${USER_HOME}/bcc_detection/bcc_detection/test_small_dataset.py" \
     --num-samples 100 \
     --batch-size 32 \
     --epochs 20 \
