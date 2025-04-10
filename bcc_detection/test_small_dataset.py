@@ -1,131 +1,125 @@
+#!/usr/bin/env python3
+
 import os
 import torch
-from pathlib import Path
-from torch.utils.data import Dataset, DataLoader
-import random
-import numpy as np
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms
 from PIL import Image
-import torchvision.transforms as transforms
+import numpy as np
+import argparse
+from pathlib import Path
 
-# Increase PIL image size limit
-Image.MAX_IMAGE_PIXELS = None
+# Force CPU usage
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
+device = torch.device('cpu')
 
-class SimpleTIFDataset(Dataset):
-    """Simple dataset for handling TIF format biopsy images"""
-    
-    def __init__(self, image_paths, labels, transform=None):
-        self.image_paths = image_paths
-        self.labels = labels
+class CustomDataset(Dataset):
+    def __init__(self, bcc_path, non_malignant_path, transform=None, num_samples=None):
         self.transform = transform
-        self.resize = transforms.Resize((512, 512))  # Resize to a manageable size
+        self.bcc_files = []
+        self.non_malignant_files = []
+        
+        # Get all BCC image files
+        for root, _, files in os.walk(bcc_path):
+            for file in files:
+                if file.lower().endswith(('.png', '.jpg', '.jpeg', '.tif')):
+                    self.bcc_files.append(os.path.join(root, file))
+        
+        # Get all non-malignant image files
+        for root, _, files in os.walk(non_malignant_path):
+            for file in files:
+                if file.lower().endswith(('.png', '.jpg', '.jpeg', '.tif')):
+                    self.non_malignant_files.append(os.path.join(root, file))
+        
+        print(f"Found {len(self.bcc_files)} BCC files and {len(self.non_malignant_files)} non-malignant files")
+        
+        if num_samples is not None:
+            num_samples_per_class = num_samples // 2
+            self.bcc_files = np.random.choice(self.bcc_files, num_samples_per_class, replace=False)
+            self.non_malignant_files = np.random.choice(self.non_malignant_files, num_samples_per_class, replace=False)
+            print(f"Selected {num_samples_per_class} BCC images and {num_samples_per_class} non-malignant images")
+        
+        self.all_files = list(self.bcc_files) + list(self.non_malignant_files)
+        self.labels = [1] * len(self.bcc_files) + [0] * len(self.non_malignant_files)
     
     def __len__(self):
-        return len(self.image_paths)
+        return len(self.all_files)
     
     def __getitem__(self, idx):
+        img_path = self.all_files[idx]
+        label = self.labels[idx]
+        
         try:
-            # Load image
-            img = Image.open(self.image_paths[idx])
-            
-            # Resize image
-            img = self.resize(img)
-            
-            # Convert to numpy array
-            img = np.array(img)
-            
-            # Convert to tensor and normalize
-            img = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
-            
-            # Apply transform if specified
+            image = Image.open(img_path).convert('RGB')
             if self.transform:
-                img = self.transform(img)
-            
-            return img, self.labels[idx]
+                image = self.transform(image)
+            return image, label
         except Exception as e:
-            print(f"Error loading image {self.image_paths[idx]}: {str(e)}")
-            raise
-
-def get_small_dataset(num_samples_per_class=5):
-    """
-    Create a small dataset for testing with a limited number of samples per class.
-    """
-    try:
-        # Base path to the dataset - using absolute path
-        base_path = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / 'dataset' / 'package'
-        print(f"Looking for dataset in: {base_path}")
-        
-        # Get paths for both classes
-        bcc_path = base_path / 'bcc' / 'data' / 'images'
-        non_malignant_path = base_path / 'non-malignant' / 'data' / 'images'
-        
-        print(f"BCC path: {bcc_path}")
-        print(f"Non-malignant path: {non_malignant_path}")
-        
-        # Get list of all TIF files
-        bcc_files = list(bcc_path.glob('*.tif'))
-        non_malignant_files = list(non_malignant_path.glob('*.tif'))
-        
-        print(f"Found {len(bcc_files)} BCC files and {len(non_malignant_files)} non-malignant files")
-        
-        if not bcc_files or not non_malignant_files:
-            raise ValueError("No image files found in one or both directories")
-        
-        # Randomly sample the specified number of files
-        bcc_files = random.sample(bcc_files, min(num_samples_per_class, len(bcc_files)))
-        non_malignant_files = random.sample(non_malignant_files, min(num_samples_per_class, len(non_malignant_files)))
-        
-        # Create lists of paths and labels
-        image_paths = bcc_files + non_malignant_files
-        labels = [1] * len(bcc_files) + [0] * len(non_malignant_files)
-        
-        print(f"Selected {len(bcc_files)} BCC images and {len(non_malignant_files)} non-malignant images")
-        
-        # Create dataset
-        dataset = SimpleTIFDataset(
-            image_paths=image_paths,
-            labels=labels
-        )
-        
-        # Create data loader with fewer workers to reduce memory usage
-        loader = DataLoader(
-            dataset,
-            batch_size=4,
-            shuffle=True,
-            num_workers=2,  # Reduced number of workers
-            pin_memory=True
-        )
-        
-        return loader
-    except Exception as e:
-        print(f"Error creating dataset: {str(e)}")
-        raise
+            print(f"Error loading image {img_path}: {str(e)}")
+            # Return a black image and the label if there's an error
+            if self.transform:
+                return torch.zeros((3, 224, 224)), label
+            return Image.new('RGB', (224, 224), 'black'), label
 
 def main():
+    parser = argparse.ArgumentParser(description='Test pipeline with small dataset')
+    parser.add_argument('--num-samples', type=int, default=10, help='Number of samples to use')
+    parser.add_argument('--batch-size', type=int, default=2, help='Batch size')
+    parser.add_argument('--epochs', type=int, default=5, help='Number of epochs')
+    parser.add_argument('--num-workers', type=int, default=0, help='Number of data loading workers')
+    args = parser.parse_args()
+
     print("Starting test with small dataset...")
+    print(f"Using device: {device}")
+
+    # Set up paths
+    dataset_root = Path("/home/bhanu/bcc_detection/dataset/package")
+    print(f"Looking for dataset in: {dataset_root}")
     
+    bcc_path = dataset_root / "bcc/data/images"
+    non_malignant_path = dataset_root / "non-malignant/data/images"
+    print(f"BCC path: {bcc_path}")
+    print(f"Non-malignant path: {non_malignant_path}")
+
+    # Set up transforms
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    # Create dataset
+    dataset = CustomDataset(
+        str(bcc_path),
+        str(non_malignant_path),
+        transform=transform,
+        num_samples=args.num_samples
+    )
+
+    # Create data loader
+    test_loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        pin_memory=False
+    )
+
+    print("\nTesting batch loading...")
     try:
-        # Create small dataset
-        test_loader = get_small_dataset(num_samples_per_class=5)
-        
-        # Print dataset information
-        print(f"\nDataset Information:")
-        print(f"Number of batches: {len(test_loader)}")
-        print(f"Batch size: {test_loader.batch_size}")
-        
-        # Test loading a batch
-        print("\nTesting batch loading...")
         for batch_idx, (images, labels) in enumerate(test_loader):
-            print(f"\nBatch {batch_idx + 1}:")
-            print(f"Images shape: {images.shape}")
-            print(f"Labels: {labels}")
+            print(f"Batch {batch_idx + 1}: Images shape: {images.shape}, Labels shape: {labels.shape}")
+            print(f"Labels in this batch: {labels.tolist()}")
+            print(f"Successfully loaded batch {batch_idx + 1}")
             
-            # Only process first batch for testing
-            break
-        
-        print("\nTest completed successfully!")
+            if batch_idx >= 2:  # Only test first 3 batches
+                break
+                
     except Exception as e:
         print(f"Error in main: {str(e)}")
         raise
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main() 
