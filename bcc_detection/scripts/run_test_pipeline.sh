@@ -23,12 +23,12 @@ fi
 
 # Activate virtual environment
 echo "Activating virtual environment..."
-if [ -d "venv" ]; then
+if [ -d "/home/bhanu/bcc_detection/bcc_detection/venv" ]; then
+    source /home/bhanu/bcc_detection/bcc_detection/venv/bin/activate
+elif [ -d "venv" ]; then
     source venv/bin/activate
 elif [ -d "../venv" ]; then
     source ../venv/bin/activate
-elif [ -d "../../venv" ]; then
-    source ../../venv/bin/activate
 else
     echo "Error: Virtual environment not found"
     exit 1
