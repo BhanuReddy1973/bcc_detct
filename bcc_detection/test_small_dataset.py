@@ -6,6 +6,9 @@ import random
 import numpy as np
 from PIL import Image
 
+# Increase PIL image size limit
+Image.MAX_IMAGE_PIXELS = None
+
 class SimpleTIFDataset(Dataset):
     """Simple dataset for handling TIF format biopsy images"""
     
