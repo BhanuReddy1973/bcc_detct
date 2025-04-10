@@ -36,8 +36,8 @@ from bcc_detection.data_loading import DataLoader, PatchLoader
 from bcc_detection.aggregation import SlidePredictor
 
 # Get the base directory
-BASE_DIR = Path(__file__).parent.parent
-DATA_DIR = BASE_DIR.parent / "dataset"
+BASE_DIR = Path(__file__).parent
+DATA_DIR = BASE_DIR.parent / "dataset"  # Changed to look for dataset at the same level as bcc_detection
 
 # Disable PIL's decompression bomb check
 Image.MAX_IMAGE_PIXELS = None
@@ -52,6 +52,14 @@ class BCCDataset(torch.utils.data.Dataset):
         # Use the correct dataset path
         self.bcc_dir = self.data_dir / "package" / "bcc" / "data" / "images"
         self.non_malignant_dir = self.data_dir / "package" / "non-malignant" / "data" / "images"
+        
+        logging.info(f"BCC directory: {self.bcc_dir}")
+        logging.info(f"Non-malignant directory: {self.non_malignant_dir}")
+        
+        if not self.bcc_dir.exists():
+            raise FileNotFoundError(f"BCC directory not found at {self.bcc_dir}")
+        if not self.non_malignant_dir.exists():
+            raise FileNotFoundError(f"Non-malignant directory not found at {self.non_malignant_dir}")
         
         self.samples = self._load_samples(num_samples, used_samples)
         logging.info(f"Initialized {split} dataset with {len(self.samples)} samples")
