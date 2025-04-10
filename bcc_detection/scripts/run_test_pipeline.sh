@@ -15,6 +15,7 @@ echo "Job started at $(date)"
 # Get the script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PYTHON_SCRIPT="${PROJECT_DIR}/test_small_dataset.py"
 
 # Get the current user's home directory
 if [ "$SUDO_USER" ]; then
@@ -25,7 +26,14 @@ fi
 
 echo "Script directory: $SCRIPT_DIR"
 echo "Project directory: $PROJECT_DIR"
+echo "Python script: $PYTHON_SCRIPT"
 echo "User home: $USER_HOME"
+
+# Check if Python script exists
+if [ ! -f "$PYTHON_SCRIPT" ]; then
+    echo "Error: Python script not found at $PYTHON_SCRIPT"
+    exit 1
+fi
 
 # Install system dependencies for OpenSlide
 echo "Installing system dependencies..."
@@ -74,7 +82,7 @@ fi
 
 # Run the test pipeline
 echo "Starting test pipeline..."
-python "${PROJECT_DIR}/test_small_dataset.py" \
+python "$PYTHON_SCRIPT" \
     --num-samples 100 \
     --batch-size 32 \
     --epochs 20 \
