@@ -22,7 +22,7 @@ fi
 
 # Activate virtual environment
 echo "Activating virtual environment..."
-source venv/bin/activate
+source ../venv/bin/activate
 
 if [ $? -ne 0 ]; then
     echo "Error: Failed to activate virtual environment"
