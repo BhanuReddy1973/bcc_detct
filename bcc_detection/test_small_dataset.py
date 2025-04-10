@@ -29,6 +29,11 @@ torch.cuda.device_count = lambda: 0
 torch.cuda.current_device = lambda: -1
 torch.cuda.set_device = lambda x: None
 
+# Disable pin memory in DataLoader
+def _dummy_pin_memory(*args, **kwargs):
+    return args[0]
+torch._utils.pin_memory.pin_memory = _dummy_pin_memory
+
 class CustomDataset(Dataset):
     def __init__(self, bcc_path, non_malignant_path, transform=None, num_samples=None):
         self.transform = transform
@@ -113,13 +118,15 @@ def main():
         num_samples=args.num_samples
     )
 
-    # Create data loader
+    # Create data loader with CPU-only settings
     test_loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-        pin_memory=False
+        pin_memory=False,
+        persistent_workers=False,
+        generator=torch.Generator(device='cpu')
     )
 
     print("\nTesting batch loading...")
