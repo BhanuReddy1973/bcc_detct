@@ -684,9 +684,16 @@ def parse_args():
                       help='Number of workers for data loading')
     parser.add_argument('--num-folds', type=int, default=5,
                       help='Number of folds for cross-validation')
+    parser.add_argument('--cache-dir', type=str, default=None,
+                      help='Directory to cache processed data')
     return parser.parse_args()
 
 def main():
+    # Initialize variables that might be needed in finally block
+    world_size = 1
+    rank = 0
+    local_rank = 0
+    
     try:
         # Parse command line arguments
         args = parse_args()
@@ -709,7 +716,7 @@ def main():
             batch_size=args.batch_size,
             num_samples=args.num_samples,
             epochs=args.epochs,
-            cache_dir=None
+            cache_dir=args.cache_dir
         )
         
         # Create final data loaders
@@ -719,7 +726,7 @@ def main():
             num_samples=args.num_samples,
             rank=rank,
             world_size=world_size,
-            cache_dir=None
+            cache_dir=args.cache_dir
         )
         
         # Initialize final model
