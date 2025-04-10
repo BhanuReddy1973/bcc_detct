@@ -24,8 +24,13 @@ import socket
 import time
 import psutil
 import subprocess
-from models.bcc_model import BCCModel
-from configs.config import Config
+import sys
+
+# Add the project root to the Python path
+sys.path.append(str(Path(__file__).parent.parent))
+
+from bcc_detection.models.bcc_model import BCCModel
+from bcc_detection.configs.config import Config
 
 # Get the base directory
 BASE_DIR = Path(__file__).parent.absolute()
