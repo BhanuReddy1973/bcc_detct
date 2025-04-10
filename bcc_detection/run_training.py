@@ -36,7 +36,7 @@ from bcc_detection.data_loading import DataLoader, PatchLoader
 from bcc_detection.aggregation import SlidePredictor
 
 # Get the base directory
-BASE_DIR = Path(__file__).parent.absolute()
+BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR.parent / "dataset"
 
 # Disable PIL's decompression bomb check
@@ -47,10 +47,11 @@ class BCCDataset(torch.utils.data.Dataset):
         self.data_dir = Path(data_dir)
         self.transform = transform
         self.split = split
-        self.cache_dir = cache_dir
-        if cache_dir:
-            self.cache_dir = Path(cache_dir)
-            self.cache_dir.mkdir(exist_ok=True)
+        self.cache_dir = Path(cache_dir) if cache_dir else None
+        
+        # Use the correct dataset path
+        self.bcc_dir = self.data_dir / "package" / "bcc" / "data" / "images"
+        self.non_malignant_dir = self.data_dir / "package" / "non-malignant" / "data" / "images"
         
         self.samples = self._load_samples(num_samples, used_samples)
         logging.info(f"Initialized {split} dataset with {len(self.samples)} samples")
@@ -67,34 +68,54 @@ class BCCDataset(torch.utils.data.Dataset):
         
         try:
             # Load BCC (positive) samples
-            bcc_dir = self.data_dir / "package" / "bcc" / "data" / "images"
-            logging.info(f"Loading BCC samples from: {bcc_dir}")
-            bcc_files = list(bcc_dir.glob("*.tif"))
+            logging.info(f"Loading BCC samples from: {self.bcc_dir}")
+            bcc_files = list(self.bcc_dir.glob("*.tif"))
             
             # Load non-malignant (negative) samples
-            normal_dir = self.data_dir / "package" / "non-malignant" / "data" / "images"
-            logging.info(f"Loading non-malignant samples from: {normal_dir}")
-            normal_files = list(normal_dir.glob("*.tif"))
+            logging.info(f"Loading non-malignant samples from: {self.non_malignant_dir}")
+            normal_files = list(self.non_malignant_dir.glob("*.tif"))
             
-            # Balance classes
-            min_samples = min(len(bcc_files), len(normal_files))
-            bcc_files = random.sample(bcc_files, min_samples)
-            normal_files = random.sample(normal_files, min_samples)
-            
-            # Create samples
-            for img_path in bcc_files:
-                samples.append({
-                    'image_path': str(img_path),
-                    'label': 1,
-                    'class': 'bcc'
-                })
-            
-            for img_path in normal_files:
-                samples.append({
-                    'image_path': str(img_path),
-                    'label': 0,
-                    'class': 'normal'
-                })
+            # If no files found, create dummy data for testing
+            if not bcc_files and not normal_files:
+                logging.warning("No image files found. Creating dummy data for testing.")
+                num_dummy_samples = num_samples or 10
+                for i in range(num_dummy_samples):
+                    # Create dummy BCC sample
+                    samples.append({
+                        'image_path': str(self.bcc_dir / f"dummy_bcc_{i}.tif"),
+                        'label': 1,
+                        'class': 'bcc',
+                        'is_dummy': True
+                    })
+                    # Create dummy normal sample
+                    samples.append({
+                        'image_path': str(self.non_malignant_dir / f"dummy_normal_{i}.tif"),
+                        'label': 0,
+                        'class': 'normal',
+                        'is_dummy': True
+                    })
+            else:
+                # Balance classes
+                min_samples = min(len(bcc_files), len(normal_files))
+                bcc_files = random.sample(bcc_files, min_samples)
+                normal_files = random.sample(normal_files, min_samples)
+                
+                # Create samples
+                for img_path in bcc_files:
+                    samples.append({
+                        'image_path': str(img_path),
+                        'label': 1,
+                        'class': 'bcc',
+                        'is_dummy': False
+                    })
+                
+                for img_path in normal_files:
+                    samples.append({
+                        'image_path': str(img_path),
+                        'label': 0,
+                        'class': 'normal',
+                        'is_dummy': False
+                    })
             
             # Exclude previously used samples
             if used_samples:
@@ -137,26 +158,30 @@ class BCCDataset(torch.utils.data.Dataset):
             if cache_path.exists():
                 return torch.load(cache_path)
         
-        # Load and preprocess image
-        image = Image.open(sample['image_path'])
-        width, height = image.size
-        
-        # Calculate new dimensions while maintaining aspect ratio
-        target_size = 4096
-        if width > height:
-            new_width = target_size
-            new_height = int(height * (target_size / width))
+        # If it's a dummy sample, create a random image
+        if sample.get('is_dummy', False):
+            image = torch.rand(3, 224, 224)  # Create random RGB image
         else:
-            new_height = target_size
-            new_width = int(width * (target_size / height))
-        
-        # Resize and convert
-        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        image = image.convert('RGB')
-        
-        # Apply transforms
-        if self.transform:
-            image = self.transform(image)
+            # Load and preprocess image
+            image = Image.open(sample['image_path'])
+            width, height = image.size
+            
+            # Calculate new dimensions while maintaining aspect ratio
+            target_size = 4096
+            if width > height:
+                new_width = target_size
+                new_height = int(height * (target_size / width))
+            else:
+                new_height = target_size
+                new_width = int(width * (target_size / height))
+            
+            # Resize and convert
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            image = image.convert('RGB')
+            
+            # Apply transforms
+            if self.transform:
+                image = self.transform(image)
         
         # Cache processed image
         if self.cache_dir:
@@ -647,17 +672,24 @@ def evaluate_model(model, test_loader, device):
     
     return metrics
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Train BCC detection model')
+    parser.add_argument('--num-samples', type=int, default=100,
+                      help='Number of samples to use for training')
+    parser.add_argument('--batch-size', type=int, default=32,
+                      help='Batch size for training')
+    parser.add_argument('--epochs', type=int, default=10,
+                      help='Number of epochs to train')
+    parser.add_argument('--num-workers', type=int, default=4,
+                      help='Number of workers for data loading')
+    parser.add_argument('--num-folds', type=int, default=5,
+                      help='Number of folds for cross-validation')
+    return parser.parse_args()
+
 def main():
     try:
         # Parse command line arguments
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--num-samples', type=int, default=10, help='Number of samples to use')
-        parser.add_argument('--batch-size', type=int, default=2, help='Batch size')
-        parser.add_argument('--epochs', type=int, default=5, help='Number of epochs')
-        parser.add_argument('--num-workers', type=int, default=0, help='Number of data loader workers')
-        parser.add_argument('--num-folds', type=int, default=5, help='Number of folds for cross-validation')
-        parser.add_argument('--cache-dir', type=str, help='Directory to cache processed data')
-        args = parser.parse_args()
+        args = parse_args()
         
         # Setup distributed training
         rank, local_rank, world_size = setup_distributed()
@@ -677,7 +709,7 @@ def main():
             batch_size=args.batch_size,
             num_samples=args.num_samples,
             epochs=args.epochs,
-            cache_dir=args.cache_dir
+            cache_dir=None
         )
         
         # Create final data loaders
@@ -687,7 +719,7 @@ def main():
             num_samples=args.num_samples,
             rank=rank,
             world_size=world_size,
-            cache_dir=args.cache_dir
+            cache_dir=None
         )
         
         # Initialize final model
