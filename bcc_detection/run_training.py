@@ -16,12 +16,20 @@ import json
 import logging
 from datetime import datetime
 import torch.cuda.amp as amp
+import gc
 
 # Get the base directory
 BASE_DIR = Path(__file__).parent.absolute()
+DATA_DIR = BASE_DIR.parent / "dataset"  # Updated path to dataset
 
 # Disable PIL's decompression bomb check
 Image.MAX_IMAGE_PIXELS = None
+
+# Memory optimization
+def optimize_memory():
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
 
 # Set up logging
 def setup_logging():
@@ -84,53 +92,65 @@ class BCCDataset(torch.utils.data.Dataset):
         self.transform = transform
         self.split = split
         self.samples = self._load_samples(num_samples, used_samples)
+        logging.info(f"Initialized {split} dataset with {len(self.samples)} samples")
     
     def _load_samples(self, num_samples=None, used_samples=None):
         samples = []
         
-        # Load BCC (positive) samples
-        bcc_dir = self.data_dir / "package" / "bcc" / "data" / "images"
-        for img_path in bcc_dir.glob("*.tif"):
-            samples.append({
-                'image_path': str(img_path),
-                'label': 1  # BCC is positive class
-            })
-        
-        # Load non-malignant (negative) samples
-        normal_dir = self.data_dir / "package" / "non-malignant" / "data" / "images"
-        for img_path in normal_dir.glob("*.tif"):
-            samples.append({
-                'image_path': str(img_path),
-                'label': 0  # Non-malignant is negative class
-            })
-        
-        # Exclude previously used samples
-        if used_samples:
-            samples = [s for s in samples if s['image_path'] not in used_samples]
-        
-        # Randomly sample if num_samples is specified
-        if num_samples is not None:
-            # Ensure equal number of samples from each class
-            bcc_samples = [s for s in samples if s['label'] == 1]
-            normal_samples = [s for s in samples if s['label'] == 0]
+        try:
+            # Load BCC (positive) samples
+            bcc_dir = self.data_dir / "package" / "bcc" / "data" / "images"
+            logging.info(f"Loading BCC samples from: {bcc_dir}")
+            bcc_files = list(bcc_dir.glob("*.tif"))
+            for img_path in bcc_files:
+                samples.append({
+                    'image_path': str(img_path),
+                    'label': 1  # BCC is positive class
+                })
             
-            # Take equal number of samples from each class
-            num_samples_per_class = num_samples // 2
-            bcc_samples = random.sample(bcc_samples, min(num_samples_per_class, len(bcc_samples)))
-            normal_samples = random.sample(normal_samples, min(num_samples_per_class, len(normal_samples)))
+            # Load non-malignant (negative) samples
+            normal_dir = self.data_dir / "package" / "non-malignant" / "data" / "images"
+            logging.info(f"Loading non-malignant samples from: {normal_dir}")
+            normal_files = list(normal_dir.glob("*.tif"))
+            for img_path in normal_files:
+                samples.append({
+                    'image_path': str(img_path),
+                    'label': 0  # Non-malignant is negative class
+                })
             
-            samples = bcc_samples + normal_samples
-        
-        # Split into train/val/test
-        random.shuffle(samples)
-        n = len(samples)
-        if self.split == 'train':
-            return samples[:int(0.7*n)]
-        elif self.split == 'val':
-            return samples[int(0.7*n):int(0.85*n)]
-        else:  # test
-            return samples[int(0.85*n):]
-    
+            logging.info(f"Found {len(bcc_files)} BCC and {len(normal_files)} non-malignant samples")
+            
+            # Exclude previously used samples
+            if used_samples:
+                samples = [s for s in samples if s['image_path'] not in used_samples]
+            
+            # Randomly sample if num_samples is specified
+            if num_samples is not None:
+                # Ensure equal number of samples from each class
+                bcc_samples = [s for s in samples if s['label'] == 1]
+                normal_samples = [s for s in samples if s['label'] == 0]
+                
+                # Take equal number of samples from each class
+                num_samples_per_class = num_samples // 2
+                bcc_samples = random.sample(bcc_samples, min(num_samples_per_class, len(bcc_samples)))
+                normal_samples = random.sample(normal_samples, min(num_samples_per_class, len(normal_samples)))
+                
+                samples = bcc_samples + normal_samples
+            
+            # Split into train/val/test
+            random.shuffle(samples)
+            n = len(samples)
+            if self.split == 'train':
+                return samples[:int(0.7*n)]
+            elif self.split == 'val':
+                return samples[int(0.7*n):int(0.85*n)]
+            else:  # test
+                return samples[int(0.85*n):]
+                
+        except Exception as e:
+            logging.error(f"Error loading samples: {str(e)}")
+            raise
+
     def __len__(self):
         return len(self.samples)
     
@@ -165,34 +185,62 @@ class BCCDataset(torch.utils.data.Dataset):
         return image, sample['label']
 
 def create_data_loaders(data_dir, batch_size=32, num_samples=None, used_samples=None):
-    # Define transforms
-    transform = transforms.Compose([
-        transforms.RandomCrop(224),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                           std=[0.229, 0.224, 0.225])
-    ])
+    try:
+        # Define transforms
+        transform = transforms.Compose([
+            transforms.RandomCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                               std=[0.229, 0.224, 0.225])
+        ])
+        
+        val_transform = transforms.Compose([
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                               std=[0.229, 0.224, 0.225])
+        ])
+        
+        # Create datasets
+        train_dataset = BCCDataset(data_dir, transform, 'train', num_samples, used_samples)
+        val_dataset = BCCDataset(data_dir, val_transform, 'val', num_samples, used_samples)
+        test_dataset = BCCDataset(data_dir, val_transform, 'test', num_samples, used_samples)
+        
+        # Create data loaders with memory-efficient settings
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=2,  # Reduced number of workers
+            pin_memory=True if torch.cuda.is_available() else False,
+            persistent_workers=True
+        )
+        
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=2,
+            pin_memory=True if torch.cuda.is_available() else False,
+            persistent_workers=True
+        )
+        
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=2,
+            pin_memory=True if torch.cuda.is_available() else False,
+            persistent_workers=True
+        )
+        
+        return train_loader, val_loader, test_loader
     
-    val_transform = transforms.Compose([
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                           std=[0.229, 0.224, 0.225])
-    ])
-    
-    # Create datasets
-    train_dataset = BCCDataset(data_dir, transform, 'train', num_samples, used_samples)
-    val_dataset = BCCDataset(data_dir, val_transform, 'val', num_samples, used_samples)
-    test_dataset = BCCDataset(data_dir, val_transform, 'test', num_samples, used_samples)
-    
-    # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-    
-    return train_loader, val_loader, test_loader
+    except Exception as e:
+        logging.error(f"Error creating data loaders: {str(e)}")
+        raise
 
 # Modified BCCModel with GPU support
 class BCCModel(nn.Module):
@@ -329,12 +377,12 @@ def train_with_hyperparams(model, train_loader, val_loader, criterion, optimizer
     
     for epoch in range(num_epochs):
         # Training
-        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device, scaler)
+        train_loss, train_acc, train_preds, train_labels = train_epoch(model, train_loader, criterion, optimizer, device, scaler)
         train_losses.append(train_loss)
         train_accs.append(train_acc)
         
         # Validation
-        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        val_loss, val_acc, val_preds, val_labels = validate(model, val_loader, criterion, device)
         val_losses.append(val_loss)
         val_accs.append(val_acc)
         
@@ -382,52 +430,68 @@ def hyperparameter_tuning(train_loader, val_loader, device, iteration):
     return best_model, best_params, best_acc
 
 def main():
-    # Set up logging
-    log_file = setup_logging()
-    logging.info("Starting training process")
-    
-    # Check for GPU availability
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logging.info(f"Using device: {device}")
-    
-    if device.type == "cuda":
-        logging.info(f"GPU: {torch.cuda.get_device_name(0)}")
-        logging.info(f"Memory allocated: {torch.cuda.memory_allocated()/1024**2:.2f} MB")
-        logging.info(f"Memory cached: {torch.cuda.memory_reserved()/1024**2:.2f} MB")
-    
     try:
+        # Set up logging
+        log_file = setup_logging()
+        logging.info("Starting training process")
+        
+        # Check for GPU availability
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logging.info(f"Using device: {device}")
+        
+        if device.type == "cuda":
+            logging.info(f"GPU: {torch.cuda.get_device_name(0)}")
+            logging.info(f"Memory allocated: {torch.cuda.memory_allocated()/1024**2:.2f} MB")
+            logging.info(f"Memory cached: {torch.cuda.memory_reserved()/1024**2:.2f} MB")
+        
         # Create data loaders
-        data_dir = BASE_DIR / "data"
+        logging.info(f"Creating data loaders with data directory: {DATA_DIR}")
         train_loader, val_loader, test_loader = create_data_loaders(
-            data_dir,
-            batch_size=4,  # Reduced batch size for testing
-            num_samples=10  # Limit to 10 samples (5 from each class)
+            data_dir=DATA_DIR,
+            batch_size=32,
+            num_samples=None  # Set to a number if you want to limit samples
         )
         
-        # Initialize model and training components
+        # Initialize model
         model = BCCModel().to(device)
         criterion = nn.CrossEntropyLoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         
         # Train model
+        num_epochs = 10
         best_model_path = train_with_hyperparams(
             model, train_loader, val_loader, criterion, optimizer, device,
-            num_epochs=5,  # Reduced epochs for testing
-            iteration=1
+            num_epochs=num_epochs, iteration=1
         )
         
-        # Load best model and test
+        # Load best model for testing
         best_model = load_model(best_model_path, device)
-        test_loss, test_acc = validate(best_model, test_loader, criterion, device)
         
-        logging.info(f"Final Test Results - Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
+        # Test the model
+        test_loss, test_acc, test_preds, test_labels = validate(best_model, test_loader, criterion, device)
+        logging.info(f"\nTest Results:")
+        logging.info(f"Test Loss: {test_loss:.4f}")
+        logging.info(f"Test Accuracy: {test_acc:.2f}%")
+        
+        # Plot confusion matrix
+        plot_confusion_matrix(test_labels, test_preds, iteration=1)
+        
+        # Print classification report
+        report = classification_report(test_labels, test_preds)
+        logging.info("\nClassification Report:")
+        logging.info(report)
+        
+        # Save classification report
+        report_dir = BASE_DIR / "reports"
+        report_dir.mkdir(exist_ok=True)
+        with open(report_dir / "classification_report.txt", "w") as f:
+            f.write(report)
+        
+        logging.info("Training completed successfully!")
         
     except Exception as e:
-        logging.error(f"Training failed: {str(e)}")
+        logging.error(f"Error in main: {str(e)}")
         raise
-    
-    logging.info("Training completed successfully")
-    logging.info(f"Log file saved at: {log_file}")
 
 if __name__ == "__main__":
     main() 
