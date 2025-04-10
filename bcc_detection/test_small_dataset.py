@@ -13,7 +13,11 @@ from pathlib import Path
 
 # Force CPU usage
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
+torch.set_num_threads(1)  # Limit CPU threads
 device = torch.device('cpu')
+
+# Disable CUDA
+torch.cuda.is_available = lambda: False
 
 class CustomDataset(Dataset):
     def __init__(self, bcc_path, non_malignant_path, transform=None, num_samples=None):
@@ -73,6 +77,7 @@ def main():
 
     print("Starting test with small dataset...")
     print(f"Using device: {device}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
 
     # Set up paths
     dataset_root = Path("/home/bhanu/bcc_detection/dataset/package")
