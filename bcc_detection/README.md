@@ -160,19 +160,35 @@ This project implements a comprehensive pipeline for automated BCC detection usi
 
 ```
 bcc_detection/
-├── configs/            # Configuration files
-├── data/              # Data directory
-│   ├── raw/           # Raw WSI files
-│   ├── processed/     # Processed patches
-│   ├── annotations/   # Ground truth annotations
-│   └── splits/        # Dataset splits
-├── preprocessing/     # Preprocessing modules
-├── feature_extraction/# Feature extraction modules
-├── models/           # Model architectures
-├── evaluation/       # Evaluation metrics
-├── optimization/     # Training optimization
-├── utils/           # Utility functions
-└── scripts/         # Training scripts
+├── aggregation/
+│   └── slide_prediction.py
+├── data_loading/
+│   └── dataset.py
+├── feature_extraction/
+│   ├── __init__.py
+│   ├── fuzzy_clustering.py
+│   ├── deep_features.py
+│   └── feature_extractor.py
+├── models/
+│   ├── __init__.py
+│   ├── model.py
+│   └── bcc_model.py
+├── preprocessing/
+│   ├── __init__.py
+│   ├── tissue_segmentation.py
+│   ├── tissue_packing.py
+│   └── color_normalization.py
+├── visualization/
+│   └── plotting.py
+├── scripts/
+│   └── run_training.py
+├── tests/
+│   └── test_small_dataset.py
+├── configs/
+├── logs/
+├── reports/
+├── data/
+└── requirements.txt
 ```
 
 ## Installation

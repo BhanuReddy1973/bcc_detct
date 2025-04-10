@@ -5,6 +5,10 @@ from torchvision import models, transforms
 from skimage.feature import graycomatrix, graycoprops
 from skimage.color import rgb2gray
 import cv2
+from torchvision.models import efficientnet_b7, EfficientNet_B7_Weights
+from sklearn.decomposition import PCA
+from skimage.color import rgb2hsv, rgb2lab, rgb2ycbcr
+import logging
 
 class FeatureExtractor(nn.Module):
     """Feature extractor using pre-trained ResNet50."""
@@ -121,4 +125,159 @@ def extract_hybrid_features(patches):
     # Combine features
     hybrid_features = np.concatenate([resnet_features, traditional_features], axis=1)
     
-    return hybrid_features 
+    return hybrid_features
+
+class FeatureExtractor:
+    def __init__(self, pca_components=256):
+        self.pca_components = pca_components
+        self.pca = None
+        self._init_efficientnet()
+    
+    def _init_efficientnet(self):
+        """Initialize EfficientNet-B7 with pretrained weights"""
+        self.efficientnet = efficientnet_b7(weights=EfficientNet_B7_Weights.IMAGENET1K_V1)
+        # Remove classification head
+        self.efficientnet.classifier = nn.Identity()
+        self.efficientnet.eval()
+    
+    def extract_deep_features(self, patches):
+        """Extract features using EfficientNet-B7"""
+        try:
+            # Convert patches to tensor
+            patches_tensor = torch.stack([self._preprocess_patch(p) for p in patches])
+            
+            # Extract features
+            with torch.no_grad():
+                features = self.efficientnet(patches_tensor)
+            
+            return features.numpy()
+            
+        except Exception as e:
+            logging.error(f"Error extracting deep features: {str(e)}")
+            raise
+    
+    def _preprocess_patch(self, patch):
+        """Preprocess patch for EfficientNet"""
+        # Convert to tensor and normalize
+        patch_tensor = torch.from_numpy(patch).permute(2, 0, 1).float()
+        patch_tensor = patch_tensor / 255.0
+        patch_tensor = (patch_tensor - torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)) / \
+                      torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+        return patch_tensor
+    
+    def extract_color_features(self, patches):
+        """Extract color-based features"""
+        color_features = []
+        
+        for patch in patches:
+            # Convert to different color spaces
+            hsv = rgb2hsv(patch)
+            lab = rgb2lab(patch)
+            ycbcr = rgb2ycbcr(patch)
+            
+            # Extract statistical features
+            stats = []
+            for channel in [patch, hsv, lab, ycbcr]:
+                for c in range(channel.shape[2]):
+                    stats.extend([
+                        np.mean(channel[:,:,c]),
+                        np.std(channel[:,:,c]),
+                        np.median(channel[:,:,c]),
+                        np.percentile(channel[:,:,c], 25),
+                        np.percentile(channel[:,:,c], 75)
+                    ])
+            
+            # Extract texture features using GLCM
+            gray = np.mean(patch, axis=2)
+            glcm = graycomatrix(gray.astype(np.uint8), [1], [0], 256, symmetric=True, normed=True)
+            texture_features = [
+                graycoprops(glcm, 'contrast')[0, 0],
+                graycoprops(glcm, 'dissimilarity')[0, 0],
+                graycoprops(glcm, 'homogeneity')[0, 0],
+                graycoprops(glcm, 'energy')[0, 0],
+                graycoprops(glcm, 'correlation')[0, 0]
+            ]
+            
+            # Combine all features
+            features = np.concatenate([stats, texture_features])
+            color_features.append(features)
+        
+        return np.array(color_features)
+    
+    def fit_pca(self, features):
+        """Fit PCA on training features"""
+        self.pca = PCA(n_components=self.pca_components)
+        self.pca.fit(features)
+    
+    def transform_features(self, deep_features, color_features):
+        """Transform features using PCA and concatenate"""
+        try:
+            # Reduce dimensionality of deep features
+            if self.pca is None:
+                raise ValueError("PCA not fitted. Call fit_pca first.")
+            
+            reduced_deep_features = self.pca.transform(deep_features)
+            
+            # Concatenate features
+            combined_features = np.concatenate([reduced_deep_features, color_features], axis=1)
+            
+            return combined_features
+            
+        except Exception as e:
+            logging.error(f"Error transforming features: {str(e)}")
+            raise
+
+class FuzzyCMeans:
+    def __init__(self, n_clusters=3, m=2, max_iter=100):
+        self.n_clusters = n_clusters
+        self.m = m
+        self.max_iter = max_iter
+        self.centers = None
+    
+    def fit(self, X):
+        """Fit FCM model"""
+        n_samples = X.shape[0]
+        n_features = X.shape[1]
+        
+        # Initialize membership matrix
+        U = np.random.rand(n_samples, self.n_clusters)
+        U = U / np.sum(U, axis=1, keepdims=True)
+        
+        for _ in range(self.max_iter):
+            # Update centers
+            centers = np.zeros((self.n_clusters, n_features))
+            for j in range(self.n_clusters):
+                centers[j] = np.sum((U[:, j] ** self.m)[:, np.newaxis] * X, axis=0) / \
+                           np.sum(U[:, j] ** self.m)
+            
+            # Update membership matrix
+            distances = np.zeros((n_samples, self.n_clusters))
+            for j in range(self.n_clusters):
+                distances[:, j] = np.sum((X - centers[j]) ** 2, axis=1)
+            
+            U_new = np.zeros_like(U)
+            for j in range(self.n_clusters):
+                U_new[:, j] = 1.0 / np.sum((distances[:, j, np.newaxis] / distances) ** (2 / (self.m - 1)), axis=1)
+            
+            # Check convergence
+            if np.max(np.abs(U_new - U)) < 1e-5:
+                break
+            
+            U = U_new
+        
+        self.centers = centers
+        return U
+    
+    def predict(self, X):
+        """Predict membership values for new data"""
+        n_samples = X.shape[0]
+        distances = np.zeros((n_samples, self.n_clusters))
+        
+        for j in range(self.n_clusters):
+            distances[:, j] = np.sum((X - self.centers[j]) ** 2, axis=1)
+        
+        U = np.zeros_like(distances)
+        for j in range(self.n_clusters):
+            U[:, j] = 1.0 / np.sum((distances[:, j, np.newaxis] / distances) ** (2 / (self.m - 1)), axis=1)
+        
+        return U 
