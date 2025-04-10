@@ -138,3 +138,98 @@ def create_data_loaders(data_dir, batch_size, num_samples=None, used_samples=Non
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
     return train_loader, val_loader, test_loader 
+
+def train_epoch(model, train_loader, criterion, optimizer, device):
+    model.train()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+
+    for images, labels in train_loader:
+        images, labels = images.to(device), labels.to(device)
+        
+        # Zero the parameter gradients
+        optimizer.zero_grad()
+        
+        # Forward pass
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+        
+        # Backward pass and optimize
+        loss.backward()
+        optimizer.step()
+        
+        # Statistics
+        running_loss += loss.item()
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+    return running_loss / len(train_loader), 100 * correct / total
+
+def validate(model, val_loader, criterion, device):
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for images, labels in val_loader:
+            images, labels = images.to(device), labels.to(device)
+            
+            # Forward pass
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            
+            # Statistics
+            running_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    return running_loss / len(val_loader), 100 * correct / total
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Train BCC detection model')
+    parser.add_argument('--num-samples', type=int, default=100, help='Number of samples to use')
+    parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
+    parser.add_argument('--num-workers', type=int, default=4, help='Number of data loader workers')
+    args = parser.parse_args()
+
+    # Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    # Create data loaders
+    data_dir = "dataset"  # Update with your dataset path
+    train_loader, val_loader, test_loader = create_data_loaders(
+        data_dir, args.batch_size, args.num_samples, num_workers=args.num_workers
+    )
+
+    # Initialize model
+    model = BCCModel().to(device)
+    
+    # Define loss function and optimizer
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    # Training loop
+    best_val_acc = 0.0
+    for epoch in range(args.epochs):
+        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
+        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        
+        print(f'Epoch {epoch+1}/{args.epochs}:')
+        print(f'Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
+        print(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
+        
+        # Save best model
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), 'best_model.pth')
+            print(f'New best model saved with validation accuracy: {val_acc:.2f}%')
+
+if __name__ == '__main__':
+    main() 
