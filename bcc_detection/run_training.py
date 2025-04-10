@@ -281,46 +281,75 @@ def validate(model, val_loader, criterion, device):
     
     return running_loss / len(val_loader), 100. * correct / total, all_preds, all_labels
 
+def load_model(model_path, device):
+    """Load a model checkpoint with proper error handling for PyTorch 2.6+"""
+    try:
+        # Try loading with weights_only=True first (PyTorch 2.6+)
+        checkpoint = torch.load(model_path, weights_only=True)
+        model = BCCModel()
+        model.load_state_dict(checkpoint)
+        model = model.to(device)
+        return model
+    except Exception as e:
+        logging.warning(f"Failed to load with weights_only=True: {str(e)}")
+        try:
+            # Fallback to traditional loading
+            checkpoint = torch.load(model_path)
+            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                model = BCCModel()
+                model.load_state_dict(checkpoint['model_state_dict'])
+            else:
+                model = checkpoint
+            model = model.to(device)
+            return model
+        except Exception as e:
+            logging.error(f"Failed to load model: {str(e)}")
+            raise
+
+def save_model(model, model_path):
+    """Save model state with proper error handling"""
+    try:
+        torch.save(model.state_dict(), model_path)
+        logging.info(f"Model saved successfully to {model_path}")
+    except Exception as e:
+        logging.error(f"Failed to save model: {str(e)}")
+        raise
+
 def train_with_hyperparams(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, iteration):
-    best_val_acc = 0
-    best_model = None
+    """Train model with hyperparameters and save best model"""
+    best_val_loss = float('inf')
+    best_model_path = BASE_DIR / "models" / f"best_model_iteration_{iteration}.pth"
+    
     train_losses = []
     val_losses = []
     train_accs = []
     val_accs = []
     
-    # Initialize gradient scaler for mixed precision training
     scaler = amp.GradScaler()
     
     for epoch in range(num_epochs):
-        train_loss, train_acc, train_preds, train_labels = train_epoch(
-            model, train_loader, criterion, optimizer, device, scaler
-        )
-        val_loss, val_acc, val_preds, val_labels = validate(
-            model, val_loader, criterion, device
-        )
-        
+        # Training
+        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device, scaler)
         train_losses.append(train_loss)
-        val_losses.append(val_loss)
         train_accs.append(train_acc)
+        
+        # Validation
+        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        val_losses.append(val_loss)
         val_accs.append(val_acc)
         
-        logging.info(f"\nEpoch {epoch+1}/{num_epochs}:")
-        logging.info(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%")
-        logging.info(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+        logging.info(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
         
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            best_model = copy.deepcopy(model)
-            logging.info("New best model saved!")
-            
-            # Save confusion matrix for best model
-            plot_confusion_matrix(val_labels, val_preds, f"{iteration}_epoch_{epoch+1}")
+        # Save best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_model(model, best_model_path)
+            logging.info(f"New best model saved with validation loss: {val_loss:.4f}")
     
-    # Plot metrics for this training run
+    # Plot metrics
     plot_metrics(train_losses, val_losses, train_accs, val_accs, iteration)
     
-    return best_model, best_val_acc
+    return best_model_path
 
 def hyperparameter_tuning(train_loader, val_loader, device, iteration):
     param_grid = {
@@ -355,82 +384,50 @@ def hyperparameter_tuning(train_loader, val_loader, device, iteration):
 def main():
     # Set up logging
     log_file = setup_logging()
+    logging.info("Starting training process")
     
-    # Create necessary directories
-    (BASE_DIR / "visualizations").mkdir(exist_ok=True)
-    (BASE_DIR / "models").mkdir(exist_ok=True)
-    (BASE_DIR / "results").mkdir(exist_ok=True)
-    
-    # Set random seed for reproducibility
-    torch.manual_seed(42)
-    random.seed(42)
-    np.random.seed(42)
-    
-    # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Check for GPU availability
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Using device: {device}")
     
-    data_dir = BASE_DIR / "dataset"  # Using relative path
-    used_samples = set()
-    num_iterations = 10
-    total_samples = 100
+    if device.type == "cuda":
+        logging.info(f"GPU: {torch.cuda.get_device_name(0)}")
+        logging.info(f"Memory allocated: {torch.cuda.memory_allocated()/1024**2:.2f} MB")
+        logging.info(f"Memory cached: {torch.cuda.memory_reserved()/1024**2:.2f} MB")
     
-    # Store results for all iterations
-    all_results = []
-    
-    for iteration in range(num_iterations):
-        logging.info(f"\nStarting iteration {iteration + 1}/{num_iterations}")
-        
+    try:
+        # Create data loaders
+        data_dir = BASE_DIR / "data"
         train_loader, val_loader, test_loader = create_data_loaders(
             data_dir,
-            batch_size=32,
-            num_samples=total_samples,
-            used_samples=used_samples
+            batch_size=4,  # Reduced batch size for testing
+            num_samples=10  # Limit to 10 samples (5 from each class)
         )
         
-        for loader in [train_loader, val_loader, test_loader]:
-            for sample in loader.dataset.samples:
-                used_samples.add(sample['image_path'])
-        
-        logging.info(f"Train samples: {len(train_loader.dataset)}")
-        logging.info(f"Validation samples: {len(val_loader.dataset)}")
-        logging.info(f"Test samples: {len(test_loader.dataset)}")
-        
-        best_model, best_params, best_val_acc = hyperparameter_tuning(
-            train_loader, val_loader, device, iteration
-        )
-        
-        logging.info(f"\nBest parameters found: {best_params}")
-        logging.info(f"Best validation accuracy: {best_val_acc:.2f}%")
-        
+        # Initialize model and training components
+        model = BCCModel().to(device)
         criterion = nn.CrossEntropyLoss()
-        test_loss, test_acc, test_preds, test_labels = validate(best_model, test_loader, criterion, device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         
-        # Save test results
-        results = {
-            'iteration': iteration + 1,
-            'best_params': best_params,
-            'validation_accuracy': best_val_acc,
-            'test_loss': test_loss,
-            'test_accuracy': test_acc,
-            'classification_report': classification_report(test_labels, test_preds, output_dict=True)
-        }
-        all_results.append(results)
+        # Train model
+        best_model_path = train_with_hyperparams(
+            model, train_loader, val_loader, criterion, optimizer, device,
+            num_epochs=5,  # Reduced epochs for testing
+            iteration=1
+        )
         
-        # Save model
-        model_path = BASE_DIR / "models" / f"best_model_iteration_{iteration + 1}.pth"
-        torch.save(best_model.state_dict(), model_path)
-        logging.info(f"Saved best model for iteration {iteration + 1}")
+        # Load best model and test
+        best_model = load_model(best_model_path, device)
+        test_loss, test_acc = validate(best_model, test_loader, criterion, device)
         
-        # Plot confusion matrix for test set
-        plot_confusion_matrix(test_labels, test_preds, f"{iteration + 1}_test")
+        logging.info(f"Final Test Results - Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
+        
+    except Exception as e:
+        logging.error(f"Training failed: {str(e)}")
+        raise
     
-    # Save all results
-    results_path = BASE_DIR / "results" / "training_results.json"
-    with open(results_path, 'w') as f:
-        json.dump(all_results, f, indent=4)
-    
-    logging.info(f"\nTraining completed. Log file: {log_file}")
+    logging.info("Training completed successfully")
+    logging.info(f"Log file saved at: {log_file}")
 
 if __name__ == "__main__":
     main() 
