@@ -12,21 +12,17 @@
 # Print start time
 echo "Job started at $(date)"
 
-# Load required modules
-echo "Loading modules..."
-module load python/3.8
-module load cuda/11.7
-module load cudnn/8.4
-
-# Check if modules loaded successfully
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to load modules"
-    exit 1
+# Load required modules if available
+if command -v module &> /dev/null; then
+    echo "Loading modules..."
+    module load python/3.8
+    module load cuda/11.7
+    module load cudnn/8.4
 fi
 
 # Activate virtual environment
 echo "Activating virtual environment..."
-source ~/venv/bin/activate
+source venv/bin/activate
 
 if [ $? -ne 0 ]; then
     echo "Error: Failed to activate virtual environment"
@@ -35,7 +31,7 @@ fi
 
 # Set environment variables
 echo "Setting environment variables..."
-export PYTHONPATH=$PYTHONPATH:$(pwd)/..
+export PYTHONPATH=$PYTHONPATH:$(pwd)
 
 # Create necessary directories
 echo "Creating directories..."
@@ -50,7 +46,7 @@ nvidia-smi
 
 # Run the test pipeline
 echo "Starting test pipeline..."
-python test_pipeline.py \
+python test_small_dataset.py \
     --num-samples 100 \
     --batch-size 32 \
     --epochs 20 \
