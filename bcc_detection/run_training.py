@@ -24,6 +24,8 @@ import socket
 import time
 import psutil
 import subprocess
+from models.bcc_model import BCCModel
+from configs.config import Config
 
 # Get the base directory
 BASE_DIR = Path(__file__).parent.absolute()
@@ -383,10 +385,10 @@ def main():
     try:
         # Parse command line arguments
         parser = argparse.ArgumentParser()
-        parser.add_argument('--num-samples', type=int, default=100, help='Number of samples to use')
-        parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
-        parser.add_argument('--epochs', type=int, default=20, help='Number of epochs')
-        parser.add_argument('--num-workers', type=int, default=2, help='Number of data loader workers')
+        parser.add_argument('--num-samples', type=int, default=10, help='Number of samples to use')
+        parser.add_argument('--batch-size', type=int, default=2, help='Batch size')
+        parser.add_argument('--epochs', type=int, default=5, help='Number of epochs')
+        parser.add_argument('--num-workers', type=int, default=0, help='Number of data loader workers')
         args = parser.parse_args()
         
         # Setup distributed training
@@ -397,7 +399,7 @@ def main():
         logging.info(f"Starting training process on rank {rank} of {world_size}")
         
         # Set device
-        device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cpu")  # Force CPU for testing
         logging.info(f"Using device: {device}")
         
         # Create data loaders with optimized settings
