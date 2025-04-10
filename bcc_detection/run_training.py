@@ -32,6 +32,104 @@ DATA_DIR = BASE_DIR.parent / "dataset"
 # Disable PIL's decompression bomb check
 Image.MAX_IMAGE_PIXELS = None
 
+class BCCDataset(torch.utils.data.Dataset):
+    def __init__(self, data_dir, transform=None, split='train', num_samples=None, used_samples=None):
+        self.data_dir = Path(data_dir)
+        self.transform = transform
+        self.split = split
+        self.samples = self._load_samples(num_samples, used_samples)
+        logging.info(f"Initialized {split} dataset with {len(self.samples)} samples")
+    
+    def _load_samples(self, num_samples=None, used_samples=None):
+        samples = []
+        
+        try:
+            # Load BCC (positive) samples
+            bcc_dir = self.data_dir / "package" / "bcc" / "data" / "images"
+            logging.info(f"Loading BCC samples from: {bcc_dir}")
+            bcc_files = list(bcc_dir.glob("*.tif"))
+            for img_path in bcc_files:
+                samples.append({
+                    'image_path': str(img_path),
+                    'label': 1  # BCC is positive class
+                })
+            
+            # Load non-malignant (negative) samples
+            normal_dir = self.data_dir / "package" / "non-malignant" / "data" / "images"
+            logging.info(f"Loading non-malignant samples from: {normal_dir}")
+            normal_files = list(normal_dir.glob("*.tif"))
+            for img_path in normal_files:
+                samples.append({
+                    'image_path': str(img_path),
+                    'label': 0  # Non-malignant is negative class
+                })
+            
+            logging.info(f"Found {len(bcc_files)} BCC and {len(normal_files)} non-malignant samples")
+            
+            # Exclude previously used samples
+            if used_samples:
+                samples = [s for s in samples if s['image_path'] not in used_samples]
+            
+            # Randomly sample if num_samples is specified
+            if num_samples is not None:
+                # Ensure equal number of samples from each class
+                bcc_samples = [s for s in samples if s['label'] == 1]
+                normal_samples = [s for s in samples if s['label'] == 0]
+                
+                # Take equal number of samples from each class
+                num_samples_per_class = num_samples // 2
+                bcc_samples = random.sample(bcc_samples, min(num_samples_per_class, len(bcc_samples)))
+                normal_samples = random.sample(normal_samples, min(num_samples_per_class, len(normal_samples)))
+                
+                samples = bcc_samples + normal_samples
+            
+            # Split into train/val/test
+            random.shuffle(samples)
+            n = len(samples)
+            if self.split == 'train':
+                return samples[:int(0.7*n)]
+            elif self.split == 'val':
+                return samples[int(0.7*n):int(0.85*n)]
+            else:  # test
+                return samples[int(0.85*n):]
+                
+        except Exception as e:
+            logging.error(f"Error loading samples: {str(e)}")
+            raise
+
+    def __len__(self):
+        return len(self.samples)
+    
+    def __getitem__(self, idx):
+        sample = self.samples[idx]
+        
+        # Load and resize the image
+        image = Image.open(sample['image_path'])
+        
+        # Get original dimensions
+        width, height = image.size
+        
+        # Calculate new dimensions while maintaining aspect ratio
+        target_size = 4096  # Maximum dimension
+        if width > height:
+            new_width = target_size
+            new_height = int(height * (target_size / width))
+        else:
+            new_height = target_size
+            new_width = int(width * (target_size / height))
+        
+        # Resize the image
+        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        # Convert to RGB
+        image = image.convert('RGB')
+        
+        # Extract a random 224x224 patch
+        if self.transform:
+            image = self.transform(image)
+        
+        return image, sample['label']
+
 def setup_distributed():
     """Initialize distributed training"""
     if 'SLURM_PROCID' in os.environ:
