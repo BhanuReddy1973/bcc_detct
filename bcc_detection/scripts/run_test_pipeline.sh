@@ -14,28 +14,21 @@ echo "Job started at $(date)"
 
 # Install system dependencies for OpenSlide
 echo "Installing system dependencies..."
-if command -v apt-get &> /dev/null; then
-    sudo apt-get update
-    sudo apt-get install -y openslide-tools libopenslide-dev
-elif command -v yum &> /dev/null; then
-    sudo yum install -y openslide-tools openslide-devel
-fi
+sudo apt-get update
+sudo apt-get install -y openslide-tools libopenslide-dev
 
 # Activate virtual environment
 echo "Activating virtual environment..."
 if [ -d "/home/bhanu/bcc_detection/bcc_detection/venv" ]; then
     source /home/bhanu/bcc_detection/bcc_detection/venv/bin/activate
-elif [ -d "venv" ]; then
-    source venv/bin/activate
-elif [ -d "../venv" ]; then
-    source ../venv/bin/activate
 else
-    echo "Error: Virtual environment not found"
+    echo "Error: Virtual environment not found at /home/bhanu/bcc_detection/bcc_detection/venv"
     exit 1
 fi
 
 # Install Python packages
 echo "Installing Python packages..."
+pip install --upgrade pip
 pip install openslide-python
 pip install openslide-bin
 pip install -r requirements.txt
