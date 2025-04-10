@@ -15,10 +15,19 @@ from pathlib import Path
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 torch.set_num_threads(1)  # Limit CPU threads
+
+# Ensure we're using CPU
+if hasattr(torch, 'cuda'):
+    torch.cuda.is_available = lambda: False
 device = torch.device('cpu')
 
-# Disable CUDA
-torch.cuda.is_available = lambda: False
+# Disable CUDA support in PyTorch
+def _dummy_cuda_device(*args, **kwargs):
+    raise RuntimeError("CUDA is not available")
+torch.cuda.device = _dummy_cuda_device
+torch.cuda.device_count = lambda: 0
+torch.cuda.current_device = lambda: -1
+torch.cuda.set_device = lambda x: None
 
 class CustomDataset(Dataset):
     def __init__(self, bcc_path, non_malignant_path, transform=None, num_samples=None):
