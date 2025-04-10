@@ -12,26 +12,32 @@
 # Print start time
 echo "Job started at $(date)"
 
-# Load required modules if available
-if command -v module &> /dev/null; then
-    echo "Loading modules..."
-    module load python/3.8
-    module load cuda/11.7
-    module load cudnn/8.4
+# Install system dependencies for OpenSlide
+echo "Installing system dependencies..."
+if command -v apt-get &> /dev/null; then
+    sudo apt-get update
+    sudo apt-get install -y openslide-tools libopenslide-dev
+elif command -v yum &> /dev/null; then
+    sudo yum install -y openslide-tools openslide-devel
 fi
 
 # Activate virtual environment
 echo "Activating virtual environment..."
-source ../venv/bin/activate
-
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to activate virtual environment"
+if [ -d "venv" ]; then
+    source venv/bin/activate
+elif [ -d "../venv" ]; then
+    source ../venv/bin/activate
+elif [ -d "../../venv" ]; then
+    source ../../venv/bin/activate
+else
+    echo "Error: Virtual environment not found"
     exit 1
 fi
 
 # Install Python packages
 echo "Installing Python packages..."
 pip install openslide-python
+pip install openslide-bin
 pip install -r requirements.txt
 
 # Set environment variables
@@ -48,7 +54,11 @@ mkdir -p visualizations
 
 # Check GPU availability
 echo "Checking GPU availability..."
-nvidia-smi
+if command -v nvidia-smi &> /dev/null; then
+    nvidia-smi
+else
+    echo "No GPU available, running on CPU"
+fi
 
 # Run the test pipeline
 echo "Starting test pipeline..."
