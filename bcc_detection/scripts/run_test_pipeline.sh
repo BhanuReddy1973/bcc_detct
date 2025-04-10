@@ -29,9 +29,15 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# Install Python packages
+echo "Installing Python packages..."
+pip install openslide-python
+pip install -r requirements.txt
+
 # Set environment variables
 echo "Setting environment variables..."
 export PYTHONPATH=$PYTHONPATH:$(pwd)
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/x86_64-linux-gnu/
 
 # Create necessary directories
 echo "Creating directories..."
