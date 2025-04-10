@@ -1,0 +1,45 @@
+# Data paths
+data:
+  raw_dir: 'D:/bhanu/dataset'
+  processed_dir: 'data/processed'
+  annotations_dir: 'data/annotations'
+  splits_dir: 'data/splits'
+
+# Output paths
+outputs:
+  model_dir: 'outputs/models'
+  log_dir: 'outputs/logs'
+
+# Preprocessing parameters
+preprocessing:
+  level: 0  # Pyramid level for processing
+  patch_size: 256
+  min_tissue_percentage: 0.3
+  otsu_threshold: null  # Use automatic thresholding if null
+
+# Feature extraction parameters
+feature_extraction:
+  layers: ['features.6', 'features.7']  # Layers to extract features from
+  n_clusters: 3  # Number of clusters for fuzzy clustering
+  fuzziness: 2.0  # Fuzziness parameter for fuzzy clustering
+
+# Model parameters
+model:
+  backbone: 'efficientnet_b7'
+  num_classes: 2
+  dropout_rate: 0.5
+
+# Training parameters
+training:
+  batch_size: 32
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  epochs: 50
+  early_stopping_patience: 10
+  distributed: false  # Enable distributed training
+
+# Evaluation parameters
+evaluation:
+  uncertainty_method: 'entropy'  # 'entropy' or 'margin'
+  aggregation_method: 'majority'  # 'majority' or 'mean'
+  threshold: 0.5 

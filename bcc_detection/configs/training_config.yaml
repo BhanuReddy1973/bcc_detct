@@ -1,0 +1,65 @@
+# Training Configuration for BCC Detection Pipeline
+
+# Training parameters
+training:
+  num_iterations: 10
+  total_samples: 100000  # Adjust based on your dataset size
+  batch_size: 32  # Will be adjusted based on GPU memory
+  num_epochs: 50
+  early_stopping_patience: 10
+  checkpoint_frequency: 5  # Save checkpoint every N epochs
+  num_workers: 4  # Number of data loading workers
+  pin_memory: true  # Pin memory for faster data transfer to GPU
+
+# Model parameters
+model:
+  dropout_rate: 0.5
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  optimizer: "adam"
+  scheduler: "reduce_lr_on_plateau"
+  scheduler_patience: 5
+  scheduler_factor: 0.5
+  gradient_clipping: 1.0
+
+# Data configuration
+data:
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+  image_size: 224
+  max_image_size: 512
+  cache_images: true  # Cache images in memory for faster training
+  shuffle_buffer_size: 10000  # Size of shuffle buffer for large datasets
+  prefetch_factor: 2  # Number of batches to prefetch
+
+# Hyperparameter tuning
+hyperparameter_tuning:
+  learning_rates: [0.001, 0.0005, 0.0001]
+  dropout_rates: [0.3, 0.5, 0.7]
+  batch_sizes: [16, 32, 64]
+  num_trials: 20
+
+# Paths (relative to script location)
+paths:
+  dataset: "../dataset"  # Dataset in parent directory
+  logs: "logs"
+  models: "models"
+  results: "results"
+  visualizations: "visualizations"
+  reports: "reports"
+
+# Resource management
+resources:
+  max_gpu_memory: 0.9  # Maximum GPU memory to use (90%)
+  mixed_precision: true  # Use mixed precision training
+  gradient_accumulation_steps: 1  # Number of steps to accumulate gradients
+  num_gpus: 1  # Number of GPUs to use
+  distributed_training: false  # Enable distributed training if multiple GPUs
+
+# Monitoring
+monitoring:
+  log_interval: 100  # Log metrics every N batches
+  save_interval: 1000  # Save intermediate results every N batches
+  tensorboard: true
+  wandb: false  # Set to true to enable Weights & Biases logging 
